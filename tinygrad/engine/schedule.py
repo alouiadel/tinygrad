@@ -1,6 +1,6 @@
 import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Callable, Tuple, List, Dict, Optional, Set, DefaultDict, cast, get_args
 from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, MetaOps, PatternMatcher, ReduceOps, UNSAFE_PAD_OPS, UPat, UnaryOps, UOp, UOps, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
@@ -146,9 +146,9 @@ def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], uop_sts:
   if (st:=uop_sts.get(u)) and st == apply_to_st(st): return u
   if u.op is UOps.SHAPETRACKER:
     new_st = apply_to_st(u.arg)
-    return u if u.arg == new_st else replace(u, arg=new_st)
+    return u if u.arg == new_st else UOp(UOps.SHAPETRACKER, arg=new_st)
   new_srcs = tuple(st_fixup(x, apply_to_st, uop_sts, cache) for x in u.src)
-  cache[u] = ret = u if new_srcs == u.src else replace(u, src=new_srcs)
+  cache[u] = ret = u if new_srcs == u.src else UOp(u.op, u.dtype, new_srcs, u.arg)
   return ret
 
 def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:
@@ -176,7 +176,7 @@ def swizzle_reduceop(input_st:ShapeTracker, swizzle:ShapeTracker, axis:Tuple[int
 def apply_swizzle(root:UOp, rsrc:UOp, swizzle:UOp) -> UOp:
   uop_sts: Dict[UOp, ShapeTracker] = {}
   new_input_st, new_axis = swizzle_reduceop(unwrap(get_output_st(rsrc, uop_sts)), swizzle.arg, root.arg[1])
-  return replace(root, src=(st_fixup(rsrc, lambda _:new_input_st, uop_sts, {}),), arg=(root.arg[0], new_axis))
+  return UOp(UOps.REDUCE_AXIS, root.dtype, (st_fixup(rsrc, lambda _:new_input_st, uop_sts, {}),), (root.arg[0], new_axis))
 
 def push_reduceop_shape(root:UOp) -> Optional[UOp]:
   reduceops = [x for x in root.parents if x.op is UOps.REDUCE_AXIS]
